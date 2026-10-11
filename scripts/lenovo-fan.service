@@ -1,0 +1,13 @@
+[Unit]
+Description=Patched Lenovo fan modules (yogafan + lenovo-wmi-other) for Yoga Pro 7 14IAH10
+After=systemd-modules-load.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/lenovo-fan-load.sh
+ExecStop=/usr/local/sbin/lenovo-fan-unload.sh
+
+[Install]
+WantedBy=multi-user.target

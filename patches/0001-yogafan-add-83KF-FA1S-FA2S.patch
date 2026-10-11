@@ -1,0 +1,31 @@
+--- patches/yogafan.c	2026-10-11 16:41:26.369423250 +0530
++++ src/yogafan.c	2026-10-11 16:41:26.386215560 +0530
+@@ -65,6 +65,13 @@
+ 	.paths = { "\\_SB.PCI0.LPC0.EC0.FAN0", NULL }
+ };
+ 
++/* Lenovo Yoga Pro 7 14IAH10 (83KF): dual 8-bit tachometers (EC 0x104/0x137) */
++static const struct yogafan_config yoga_pro_7_14iah10_cfg = {
++	.multiplier = 100,
++	.fan_count = 2,
++	.paths = { "\\_SB.PC00.LPCB.EC0.FA1S", "\\_SB.PC00.LPCB.EC0.FA2S" }
++};
++
+ static const struct yogafan_config legion_16bit_dual_cfg = {
+ 	.multiplier = 1,
+ 	.fan_count = 2,
+@@ -171,6 +178,14 @@
+ 
+ static const struct dmi_system_id yogafan_quirks[] = {
+ 	{
++		.ident = "Lenovo Yoga Pro 7 14IAH10",
++		.matches = {
++			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
++			DMI_MATCH(DMI_PRODUCT_FAMILY, "Yoga Pro 7 14IAH10"),
++		},
++		.driver_data = (void *)&yoga_pro_7_14iah10_cfg,
++	},
++	{
+ 		.ident = "Lenovo Yoga",
+ 		.matches = {
+ 			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),

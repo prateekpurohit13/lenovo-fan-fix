@@ -1,0 +1,46 @@
+--- patches/wmi-other.c	2026-10-11 16:41:26.370845236 +0530
++++ src/wmi-other.c	2026-10-11 17:14:12.972885433 +0530
+@@ -50,7 +50,7 @@
+ #include "wmi-capdata.h"
+ #include "wmi-events.h"
+ #include "wmi-helpers.h"
+-#include "../firmware_attributes_class.h"
++#include "firmware_attributes_class.h"
+ 
+ #define LENOVO_OTHER_MODE_GUID "DC2A8805-3A8C-41BA-A6F7-092E0089CD3B"
+ 
+@@ -1643,7 +1643,7 @@
+ 
+ 	priv->cd00_list = binder.cd00_list;
+ 	priv->cd01_list = binder.cd01_list;
+-	if (!priv->cd00_list || !priv->cd01_list) {
++	if (!priv->cd00_list) {
+ 		component_unbind_all(dev, NULL);
+ 
+ 		return -ENODEV;
+@@ -1652,7 +1652,15 @@
+ 	lwmi_om_fan_info_collect_cd00(priv);
+ 	lwmi_om_psy_ext_init(priv);
+ 
+-	lwmi_om_fw_attr_add(priv);
++	/*
++	 * The firmware-attributes device needs capability data 01. On some
++	 * machines (e.g. Yoga Pro 7 14IAH10/83KF) the CAPABILITY_DATA_01
++	 * WMI block is dropped by the WMI core because its WQB1 query
++	 * method is missing, so cd01_list is never provided. Fan and
++	 * battery support still work; skip only the fw-attributes knobs.
++	 */
++	if (priv->cd01_list)
++		lwmi_om_fw_attr_add(priv);
+ 
+ 	return 0;
+ }
+@@ -1701,6 +1709,8 @@
+ 	lwmi_cd_match_add_all(&wdev->dev, &master_match);
+ 	if (IS_ERR(master_match))
+ 		return PTR_ERR(master_match);
++	if (!master_match)
++		return -ENODEV;
+ 
+ 	return component_master_add_with_match(&wdev->dev, &lwmi_om_master_ops,
+ 					       master_match);

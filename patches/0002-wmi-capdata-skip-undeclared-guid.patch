@@ -1,0 +1,31 @@
+--- patches/wmi-capdata.c	2026-10-11 16:41:26.369423250 +0530
++++ src/wmi-capdata.c	2026-10-11 16:41:26.386487816 +0530
+@@ -73,11 +73,13 @@
+ #define LWMI_CD_TABLE_ITEM(_type)		\
+ 	[_type] = {				\
+ 		.name = #_type,			\
++		.guid = _type##_GUID,		\
+ 		.type = _type,			\
+ 	}
+ 
+ static const struct lwmi_cd_info {
+ 	const char *name;
++	const char *guid;
+ 	enum lwmi_cd_type type;
+ } lwmi_cd_table[] = {
+ 	LWMI_CD_TABLE_ITEM(LENOVO_CAPABILITY_DATA_00),
+@@ -160,6 +162,14 @@
+ 		if (lwmi_cd_table[i].type == LENOVO_FAN_TEST_DATA)
+ 			continue;
+ 
++		/*
++		 * Some firmware does not declare every capdata GUID at all, in
++		 * which case no component would ever register for it and the
++		 * master could never bind.
++		 */
++		if (!wmi_has_guid(lwmi_cd_table[i].guid))
++			continue;
++
+ 		component_match_add(master, matchptr, lwmi_cd_match,
+ 				    (void *)&lwmi_cd_table[i].type);
+ 		if (IS_ERR(*matchptr))
