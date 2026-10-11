@@ -6,6 +6,16 @@ set -uo pipefail
 DIR="/usr/local/lib/lenovo-fan"
 [[ -d "$DIR" ]] || DIR="$(cd "$(dirname "$0")/.." && pwd)/src"
 
+# 0) Skip cleanly when the modules were built for a different kernel
+#    (e.g. service fires while booted into the LTS kernel).
+KERNEL_REL="$(uname -r)"
+MOD_VERMAGIC="$(modinfo -F vermagic "$DIR/yogafan.ko" 2>/dev/null | awk '{print $1}')"
+if [[ -n "$MOD_VERMAGIC" && "$MOD_VERMAGIC" != "$KERNEL_REL" ]]; then
+    echo "Modules built for $MOD_VERMAGIC, but running kernel is $KERNEL_REL."
+    echo "Skipping (rebuild with ./build.sh and reinstall to use them here)."
+    exit 0
+fi
+
 # 1) Drop any stock/previous instances first (ignore if not loaded).
 #    IMPORTANT: `modprobe -r` also removes now-unused dependencies
 #    (e.g. firmware_attributes_class), so kernel-provided dependencies

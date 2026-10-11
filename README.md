@@ -1,78 +1,116 @@
-# Lenovo Yoga Pro 7 14IAH10 (83KF) — fan monitoring + control (out-of-tree modules)
+# Lenovo Yoga Pro 7 14IAH10 (83KF) — fan RPM monitoring + fan speed control
 
-These modules add, for this laptop model only:
+Out-of-tree kernel modules that make the **two physical fans** of this laptop
+visible and controllable on Linux, for the current firmware/kernels where
+mainline does not fully work yet.
 
-| Module | What it does | Patch source |
+Verified on: Lenovo Yoga Pro 7 14IAH10, BIOS QGCN36WW, `linux` 7.2.9-arch1-1
+(Arch). The fans are exposed through two interfaces:
+
+| Interface | Attributes | What it is |
 |---|---|---|
-| `yogafan.ko` | Reads fan RPM from the EC tachometers (`FA1S` @0x104, `FA2S` @0x137) → hwmon `fan1_input`, `fan2_input` | adds a DMI entry for 83KF with the correct ACPI paths (same fix as the pending upstream patch) |
-| `lenovo-wmi-capdata.ko` | Capability-data driver, patched to **skip matches for GUIDs the firmware does not declare** | minimal out-of-tree fix, tested upstream by Navon John Lukose on this exact model |
-| `lenovo-wmi-other.ko` | WMI "Other Mode" driver → hwmon `fanN_input` / `fanN_target` (target RPM; `0` = automatic) | guard for empty component match (same upstream test patch) |
-| `lenovo-wmi-helpers.ko` | Shared helper symbols for the two modules above | unmodified upstream 7.2 source |
+| `yogafan` (hwmon) | `fan1_input`, `fan2_input` (smoothed) | EC tachometers `FA1S` (0x104) / `FA2S` (0x137) |
+| `lenovo_wmi_other` (hwmon) | `fan1_input/target`, `fan4_input/target` | Same two fans via Lenovo WMI fan IDs **1** and **4** — IDs are sparse, the machine has **2 fans, not 4** |
 
-Why: mainline currently can't bind `lenovo-wmi-other` on this firmware (`WQB1` query method missing → `CAPABILITY_DATA_01` device dropped → the component master never completes), and `yogafan` has a wrong ACPI path for this model. Both fixes are pending upstream; these modules just apply them now.
+Verified mapping: WMI `fan1` ↔ EC `fan1` (one physical fan),
+WMI `fan4` ↔ EC `fan2` (the other). Pinning one target spins only that fan.
 
-## Build (no root needed)
+## Why these modules exist
+
+Mainline currently doesn't work on this machine:
+
+- `yogafan` has a DMI entry for 83KF but with a wrong ACPI path
+  (`...EC0.FANS` doesn't exist here; the tachometers are `FA1S`/`FA2S`),
+  so it returns `-ENODEV` and no RPM shows up.
+- `lenovo-wmi-other` never completes its component-master bind, because the
+  firmware drops the `CAPABILITY_DATA_01` WMI block (its `WQB1` query method
+  is missing), so a required component is never provided.
+- The legacy `ideapad_laptop` `fan_mode` interface exists but is ignored by
+  this EC firmware (writes have no effect).
+
+The modules here apply the (pending) upstream fixes locally. Remove everything
+once those fixes land in the Arch kernel (~7.4+).
+
+## Build
 
 ```bash
-# one-time prerequisites (versions must match the installed 'linux' package):
+# prerequisites (must match the installed linux kernel)
 sudo pacman -S --needed linux-headers make
 
-# build for the installed 'linux' kernel (auto-detected):
-cd ~/lenovo-fan-fix
 ./build.sh
 ```
 
-## Use (root)
+## Install and load
 
 ```bash
-# 1) try it manually first:
-sudo ./scripts/load.sh          # add 'force' arg if fans are hidden
-./scripts/verify.sh             # shows fan RPM + target files
-sensors                         # optional
-
-# 2) load on every boot:
-sudo ./scripts/install.sh
+sudo ./scripts/install.sh                 # copies modules + systemd unit
 sudo systemctl enable --now lenovo-fan.service
+./scripts/verify.sh                       # shows hwmon devices + fan values
 ```
 
-## Controlling fan speed
+`load.sh` skips cleanly when the modules were built for a different kernel
+(e.g. booted into `linux-lts`) — fan support cannot exist there.
 
-Only after the WMI modules are loaded. Ranges are enforced by the driver
-(fan1: ~1500–5100, fan4: ~1800–5400 RPM on this model; values are rounded to
-steps of 100; out-of-range writes fail with an error):
+## Usage
+
+Read fan speeds (smoothed EC tachs + instant WMI values):
 
 ```bash
-# find the right hwmon directory first (name: lenovo_wmi_other):
+sensors
+```
+
+Control fan speed (root; values = target RPM, multiples of 100; `0` = automatic):
+
+```bash
+# locate the WMI hwmon (the one exposing fanN_target)
 grep -H . /sys/class/hwmon/hwmon*/name
 
-# pin both fans to (near) maximum:
-echo 5100 | sudo tee /sys/class/hwmon/hwmonX/fan1_target
-echo 5400 | sudo tee /sys/class/hwmon/hwmonX/fan4_target
+echo 4000 | sudo tee /sys/class/hwmon/hwmonX/fan1_target   # pin physical fan 1
+echo 0    | sudo tee /sys/class/hwmon/hwmonX/fan1_target   # release to firmware curve
 
-# hand control back to the firmware:
-echo 0 | sudo tee /sys/class/hwmon/hwmonX/fan1_target
-echo 0 | sudo tee /sys/class/hwmon/hwmonX/fan4_target
+echo 5400 | sudo tee /sys/class/hwmon/hwmonX/fan4_target   # pin physical fan 2
+echo 0    | sudo tee /sys/class/hwmon/hwmonX/fan4_target   # release
 ```
 
-While fans are pinned, the firmware curve is bypassed — don't leave a *low*
-target set indefinitely and don't rely on it for safety. `0` always resets to
-automatic.
+Limits (enforced by the driver; out-of-range writes return an error):
+`fan1`: 1500–5100 RPM · `fan4`: 1800–5400 RPM
 
-## Revert / cleanup
+While a fan is pinned, the firmware curve is bypassed for it. Don't leave a
+*low* target set — use `0` to hand control back.
+
+## Boot notes
+
+- The modules are built for the **`linux` (7.2.x)** kernel — boot that entry.
+- This machine's boot menu is UKI-based: the two identically named
+  "Arch Linux" entries are `/boot/EFI/Linux/arch-linux.efi` (7.2.x) and
+  `arch-linux-lts.efi`. With `GRUB_DEFAULT=1`, the 7.2.x UKI boots by default.
+- `linux-lts` remains installed as a fallback; the service skips silently there.
+
+## Maintenance
+
+After every kernel update:
 
 ```bash
-sudo systemctl disable --now lenovo-fan.service   # unloads modules
+./build.sh && sudo ./scripts/install.sh && sudo systemctl restart lenovo-fan.service
+```
+
+Remove (once upstream fixes land):
+
+```bash
+sudo systemctl disable --now lenovo-fan.service
 sudo rm /etc/systemd/system/lenovo-fan.service /usr/local/sbin/lenovo-fan-*.sh
 sudo rm -r /usr/local/lib/lenovo-fan
 ```
 
-To unload without uninstalling: `sudo ./scripts/unload.sh`.
+## Layout
 
-## Note
+- `src/` — patched upstream v7.2 sources + `Makefile` (out-of-tree build)
+- `scripts/` — `load.sh`, `unload.sh`, `verify.sh`, `install.sh`, systemd unit
+- `patches/` — reference diffs + pristine upstream copies
+- `build.sh` — builds against the installed `linux` kernel
 
-This is a stop-gap. Once the upstream fixes reach the Arch `linux` package
-(expected for the next kernel releases), remove these modules and everything
-works out of the box.
+## Upstream references
 
-Patches used are in `patches/` for reference. Sources are upstream Linux
-v7.2 (`GPL-2.0`).
+- yogafan path fix for 83KF: https://patchew.org/linux/20260913214713.205208-1-navonjohnlukose@gmail.com/
+- lenovo-wmi robustness series (bind fix): https://patchew.org/linux/20261009-lwmi-wmi-new-api-v2-0-402828382679@rong.moe/
+- Upstream test on this model, `fanX_target` pinning: https://lkml.iu.edu/2609.3/06460.html
